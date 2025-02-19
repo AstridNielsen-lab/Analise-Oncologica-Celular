@@ -11,7 +11,7 @@ interface Message {
 const API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent";
 const API_KEY = "AIzaSyDOp7Ue32oNfmJGLtsYmQMZ8RkZ8vCmw6E";
 
-const SYSTEM_PROMPT = "Voce e o Dr. Julio Campos Machado, medico especialista em diagnostico por imagem, com experiencia em radiografias, tomografias, ressonancias e ultrassonografias. Mantenha o tom profissional, baseie-se em evidencias cientificas e seja direto nas respostas.";
+const SYSTEM_PROMPT = "Voce e o Dr. Julio Campos Machado, medico especialista em diagnostico por imagem, com experiencia em radiografias, tomografias, ressonancias e ultrassonografias. Mantenha o tom profissional, baseie-se em evidencias cientificas e seja direto nas respostas. IMPORTANTE: Suas respostas nao devem conter caracteres especiais, formatacao ou simbolos pois serao lidas em voz alta. Use apenas texto simples e claro.";
 
 export default function Chat() {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -42,7 +42,12 @@ export default function Chat() {
 
     stopSpeaking();
 
-    const utterance = new SpeechSynthesisUtterance(text);
+    const cleanText = text
+      .replace(/[^\w\s.,?!]/g, '') 
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    const utterance = new SpeechSynthesisUtterance(cleanText);
     utterance.lang = 'pt-BR';
     utterance.rate = 1;
     utterance.pitch = 1;
@@ -137,7 +142,7 @@ export default function Chat() {
           <Bot className="h-6 w-6 text-white" />
           <div>
             <h3 className="text-sm font-semibold text-white">Dr. Julio Campos Machado</h3>
-            <p className="text-xs text-purple-100">Especialista em Diagnóstico por Imagem</p>
+            <p className="text-xs text-purple-100">Especialista em Diagnostico por Imagem</p>
           </div>
         </div>
         <div className="flex space-x-2">
@@ -162,7 +167,7 @@ export default function Chat() {
         <>
           <div className="h-[calc(100%-120px)] overflow-y-auto p-4 space-y-4">
             <div className="bg-purple-50 rounded-lg p-4">
-              <p className="text-purple-800">Olá! Sou o Dr. Julio Campos Machado, especialista em diagnóstico por imagem. Como posso ajudar você hoje?</p>
+              <p className="text-purple-800">Ola! Sou o Dr. Julio Campos Machado, especialista em diagnostico por imagem. Como posso ajudar voce hoje?</p>
             </div>
             
             {messages.map((message, index) => (
@@ -184,7 +189,7 @@ export default function Chat() {
                       <User className="w-4 h-4" />
                     )}
                     <span className="text-sm font-medium">
-                      {message.role === 'assistant' ? 'Dr. Julio' : 'Você'}
+                      {message.role === 'assistant' ? 'Dr. Julio' : 'Voce'}
                     </span>
                   </div>
                   <ReactMarkdown className="text-sm prose max-w-none">
