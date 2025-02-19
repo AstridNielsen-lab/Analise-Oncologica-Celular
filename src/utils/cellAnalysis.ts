@@ -1,19 +1,9 @@
-import { CellAnalysisResult, CellData, CellAnalysisLevel, CellDescription } from '../types/analysis';
+import { CellAnalysisResult, CellData, CellAnalysisLevel } from '../types/analysis';
 
 export class CellAnalyzer {
   private canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D;
   private startTime: Date;
-
-  private readonly CELL_DESCRIPTIONS: Record<string, string> = {
-    hyperplasia: "Increase in cell number",
-    hypoplasia: "Decrease in cell number",
-    hypertrophy: "Increase in cell size",
-    hypotrophy: "Decrease in cell size",
-    atrophy: "Decrease in cell size and number",
-    metaplasia: "Change in cell type",
-    intracellular: "Intracellular accumulations"
-  };
 
   constructor() {
     this.canvas = document.createElement('canvas');
@@ -23,7 +13,7 @@ export class CellAnalyzer {
 
   async analyzeImage(imageFile: File): Promise<CellAnalysisResult> {
     this.startTime = new Date();
-    console.log("Starting cell analysis...");
+    console.log("Starting enhanced cell analysis...");
 
     const image = await this.loadImage(imageFile);
     this.canvas.width = image.width;
@@ -31,32 +21,21 @@ export class CellAnalyzer {
     this.ctx.drawImage(image, 0, 0);
 
     const imageData = this.ctx.getImageData(0, 0, this.canvas.width, this.canvas.height);
-    const { data, width, height } = imageData;
-
-    // Process image data
-    const processedData = this.preprocessImage(data);
+    const processedData = this.advancedPreprocessImage(imageData);
     
-    // Detect cells
-    const cells = this.detectCells(processedData, width, height);
-    
-    // Analyze cells
-    const cellData = this.analyzeCells(cells, processedData, width);
-    
-    // Calculate statistics
+    const cells = this.detectCells(processedData);
+    const cellData = this.analyzeCells(cells, processedData);
     const statistics = this.calculateStatistics(cellData);
-
-    // Draw annotations
+    
     this.drawAnnotations(cells, cellData);
-
-    const endTime = new Date();
-    const executionTime = endTime.getTime() - this.startTime.getTime();
-
+    
+    const executionTime = new Date().getTime() - this.startTime.getTime();
     return {
       cells: cellData,
       statistics,
       executionTime,
       abnormalityLevel: this.determineAbnormalityLevel(statistics),
-      diagnosis: this.generateDiagnosis(cellData, statistics),
+      diagnosis: this.generateDiagnosis(statistics),
       processedImageUrl: this.canvas.toDataURL()
     };
   }
@@ -74,161 +53,152 @@ export class CellAnalyzer {
     });
   }
 
-  private preprocessImage(data: Uint8ClampedArray): Float32Array {
+  private advancedPreprocessImage(imageData: ImageData): Float32Array {
+    const { data, width, height } = imageData;
     const processed = new Float32Array(data.length / 4);
     
+    // Enhanced color weighting for better cell detection
     for (let i = 0; i < data.length; i += 4) {
-      const pixel = (data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114);
-      processed[i / 4] = this.normalizePixelValue(pixel);
+      let intensity = (data[i] * 0.3 + data[i + 1] * 0.6 + data[i + 2] * 0.1);
+      processed[i / 4] = intensity / 255;
     }
-
-    return processed;
+    return this.applyAdaptiveThreshold(processed, width, height);
   }
 
-  private normalizePixelValue(value: number): number {
-    return (value - 128) / 128; // Normalize to [-1, 1] range
-  }
-
-  private detectCells(
-    data: Float32Array,
-    width: number,
-    height: number
-  ): Array<{ x: number; y: number; width: number; height: number }> {
-    const cells: Array<{ x: number; y: number; width: number; height: number }> = [];
-    const visited = new Set<number>();
+  private applyAdaptiveThreshold(data: Float32Array, width: number, height: number): Float32Array {
+    const thresholded = new Float32Array(data.length);
+    const windowSize = 15;
+    const threshold = 0.5;
 
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
         const idx = y * width + x;
-        if (visited.has(idx)) continue;
+        let sum = 0;
+        let count = 0;
 
-        const value = data[idx];
-        if (this.isAbnormalCell(value)) {
-          const cell = this.growRegion(data, width, height, x, y, visited);
-          if (cell) cells.push(cell);
+        // Calculate local average
+        for (let wy = -windowSize; wy <= windowSize; wy++) {
+          for (let wx = -windowSize; wx <= windowSize; wx++) {
+            const ny = y + wy;
+            const nx = x + wx;
+            if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+              sum += data[ny * width + nx];
+              count++;
+            }
+          }
+        }
+
+        const localThreshold = (sum / count) * threshold;
+        thresholded[idx] = data[idx] > localThreshold ? 1 : 0;
+      }
+    }
+    return thresholded;
+  }
+
+  private detectCells(data: Float32Array): Array<{ x: number; y: number; radius: number }> {
+    const cells: Array<{ x: number; y: number; radius: number }> = [];
+    const visited = new Set<number>();
+
+    for (let i = 0; i < data.length; i++) {
+      if (!visited.has(i) && data[i] > 0.5) {
+        const x = i % this.canvas.width;
+        const y = Math.floor(i / this.canvas.width);
+        
+        // Find cell radius through region growing
+        const radius = this.findCellRadius(data, x, y, visited);
+        if (radius > 2) { // Filter out noise
+          cells.push({ x, y, radius });
         }
       }
     }
-
     return cells;
   }
 
-  private isAbnormalCell(value: number): boolean {
-    return Math.abs(value) > 0.2; // Threshold for cell detection
-  }
-
-  private growRegion(
-    data: Float32Array,
-    width: number,
-    height: number,
-    startX: number,
-    startY: number,
-    visited: Set<number>
-  ) {
-    const queue: [number, number][] = [[startX, startY]];
-    const region = {
-      x: startX,
-      y: startY,
-      width: 1,
-      height: 1
-    };
-
+  private findCellRadius(data: Float32Array, startX: number, startY: number, visited: Set<number>): number {
+    let maxDistance = 0;
+    const queue: [number, number, number][] = [[startX, startY, 0]];
+    
     while (queue.length > 0) {
-      const [x, y] = queue.shift()!;
-      const idx = y * width + x;
+      const [x, y, distance] = queue.shift()!;
+      const idx = y * this.canvas.width + x;
       
-      if (visited.has(idx)) continue;
+      if (visited.has(idx) || data[idx] <= 0.5) continue;
       visited.add(idx);
-
-      region.x = Math.min(region.x, x);
-      region.y = Math.min(region.y, y);
-      region.width = Math.max(region.width, x - region.x + 1);
-      region.height = Math.max(region.height, y - region.y + 1);
-
-      [[1,0], [-1,0], [0,1], [0,-1]].forEach(([dx, dy]) => {
+      
+      maxDistance = Math.max(maxDistance, distance);
+      
+      // Check neighbors
+      [[-1,0], [1,0], [0,-1], [0,1]].forEach(([dx, dy]) => {
         const nx = x + dx;
         const ny = y + dy;
-        if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
-          const nIdx = ny * width + nx;
-          if (!visited.has(nIdx) && this.isAbnormalCell(data[nIdx])) {
-            queue.push([nx, ny]);
-          }
+        if (nx >= 0 && nx < this.canvas.width && ny >= 0 && ny < this.canvas.height) {
+          queue.push([nx, ny, distance + 1]);
         }
       });
     }
-
-    return region;
+    
+    return maxDistance;
   }
 
-  private analyzeCells(
-    cells: Array<{ x: number; y: number; width: number; height: number }>,
-    data: Float32Array,
-    width: number
-  ): CellData[] {
+  private analyzeCells(cells: Array<{ x: number; y: number; radius: number }>, data: Float32Array): CellData[] {
     return cells.map((cell, index) => {
-      const size = cell.width * cell.height;
-      const shape = this.calculateShape(cell);
-      const colorDifference = this.calculateColorDifference(cell, data, width);
-
+      const size = Math.PI * Math.pow(cell.radius, 2);
+      const intensity = this.calculateLocalIntensity(cell, data);
+      
       return {
         id: index + 1,
         size,
-        shape,
-        colorDifference,
+        shape: 1.0, // Circular cells
+        colorDifference: intensity,
         location: this.determineLocation(cell),
-        characteristics: this.determineCharacteristics(size, shape, colorDifference)
+        characteristics: this.determineCharacteristics(cell.radius, intensity)
       };
     });
   }
 
-  private calculateShape(cell: { width: number; height: number }): number {
-    return Math.abs(1 - cell.width / cell.height);
-  }
-
-  private calculateColorDifference(
-    cell: { x: number; y: number; width: number; height: number },
-    data: Float32Array,
-    width: number
+  private calculateLocalIntensity(
+    cell: { x: number; y: number; radius: number },
+    data: Float32Array
   ): number {
     let sum = 0;
     let count = 0;
-
-    for (let y = cell.y; y < cell.y + cell.height; y++) {
-      for (let x = cell.x; x < cell.x + cell.width; x++) {
-        sum += Math.abs(data[y * width + x]);
-        count++;
+    
+    for (let y = cell.y - cell.radius; y <= cell.y + cell.radius; y++) {
+      for (let x = cell.x - cell.radius; x <= cell.x + cell.radius; x++) {
+        if (x >= 0 && x < this.canvas.width && y >= 0 && y < this.canvas.height) {
+          const idx = y * this.canvas.width + x;
+          if (Math.pow(x - cell.x, 2) + Math.pow(y - cell.y, 2) <= Math.pow(cell.radius, 2)) {
+            sum += data[idx];
+            count++;
+          }
+        }
       }
     }
-
+    
     return count > 0 ? sum / count : 0;
   }
 
   private determineLocation(cell: { x: number; y: number }): string {
-    const x = cell.x;
     const y = cell.y;
-    
     if (y < this.canvas.height / 3) return 'superior';
     if (y > (this.canvas.height * 2) / 3) return 'inferior';
     return 'central';
   }
 
-  private determineCharacteristics(size: number, shape: number, colorDifference: number): string[] {
+  private determineCharacteristics(radius: number, intensity: number): string[] {
     const characteristics: string[] = [];
-
-    if (shape > 0.3) characteristics.push('irregular');
-    if (size > 1000) characteristics.push('enlarged');
-    if (colorDifference > 0.5) characteristics.push('abnormal density');
-    if (colorDifference > 0.7) characteristics.push('possible malignant');
-
+    if (radius > 7) characteristics.push('enlarged');
+    if (intensity > 0.7) characteristics.push('high intensity');
+    if (intensity > 0.8) characteristics.push('possible malignant');
     return characteristics;
   }
 
   private calculateStatistics(cells: CellData[]) {
     const totalCells = cells.length;
     const abnormalCells = cells.filter(c => 
-      c.characteristics.includes('possible malignant')
+      c.characteristics.includes('high intensity')
     ).length;
-
+    
     return {
       totalCells,
       abnormalCells,
@@ -236,63 +206,51 @@ export class CellAnalyzer {
       averageColorDifference: cells.reduce((sum, c) => sum + c.colorDifference, 0) / totalCells,
       infestationPercentage: (abnormalCells / totalCells) * 100,
       criticalAreas: cells.filter(c => 
-        c.characteristics.includes('possible malignant') && 
-        c.location === 'central'
+        c.characteristics.includes('possible malignant')
       ).length
     };
   }
 
-  private determineAbnormalityLevel(statistics: {
-    infestationPercentage: number;
-    criticalAreas: number;
-  }): CellAnalysisLevel {
-    if (statistics.criticalAreas > 0 || statistics.infestationPercentage > 30) return 'high';
+  private determineAbnormalityLevel(statistics: { infestationPercentage: number }): CellAnalysisLevel {
+    if (statistics.infestationPercentage > 30) return 'high';
     if (statistics.infestationPercentage > 10) return 'medium';
     return 'low';
   }
 
-  private generateDiagnosis(cells: CellData[], statistics: { infestationPercentage: number }): string {
-    const malignantCells = cells.filter(c => c.characteristics.includes('possible malignant'));
-    
-    if (malignantCells.length > 0) {
-      const locations = [...new Set(malignantCells.map(c => c.location))];
-      return `Possível Malignidade Detectada - ${malignantCells.length} células suspeitas encontradas em ${locations.join(', ')} - Infestação: ${statistics.infestationPercentage.toFixed(1)}% - Recomenda-se avaliação médica urgente`;
+  private generateDiagnosis(statistics: { infestationPercentage: number }): string {
+    if (statistics.infestationPercentage > 30) {
+      return `Alta suspeita de malignidade (${statistics.infestationPercentage.toFixed(1)}%) - Investigação necessária`;
     }
-
     if (statistics.infestationPercentage > 10) {
-      return `Alterações Celulares Detectadas - ${cells.length} células analisadas - Infestação: ${statistics.infestationPercentage.toFixed(1)}% - Recomenda-se acompanhamento médico`;
+      return `Alterações celulares detectadas (${statistics.infestationPercentage.toFixed(1)}%) - Recomenda-se acompanhamento`;
     }
-
-    return 'Padrão celular dentro da normalidade';
+    return 'Padrão celular dentro dos parâmetros normais';
   }
 
-  private drawAnnotations(
-    cells: Array<{ x: number; y: number; width: number; height: number }>,
-    cellData: CellData[]
-  ) {
+  private drawAnnotations(cells: Array<{ x: number; y: number; radius: number }>, cellData: CellData[]) {
     cells.forEach((cell, index) => {
       const data = cellData[index];
       
-      // Draw cell outline
-      this.ctx.strokeStyle = this.getColorForCell(data);
+      this.ctx.beginPath();
+      this.ctx.arc(cell.x, cell.y, cell.radius, 0, 2 * Math.PI);
+      this.ctx.strokeStyle = data.characteristics.includes('possible malignant') 
+        ? '#ff0000' 
+        : data.characteristics.includes('high intensity')
+        ? '#ff9900'
+        : '#00ff00';
       this.ctx.lineWidth = 2;
-      this.ctx.strokeRect(cell.x, cell.y, cell.width, cell.height);
-      
-      // Add label
-      this.ctx.fillStyle = this.getColorForCell(data);
-      this.ctx.font = '12px Arial';
-      this.ctx.fillText(
-        `${data.characteristics.join(', ')}`,
-        cell.x,
-        cell.y - 5
-      );
-    });
-  }
+      this.ctx.stroke();
 
-  private getColorForCell(cell: CellData): string {
-    if (cell.characteristics.includes('possible malignant')) return '#ff0000';
-    if (cell.characteristics.includes('abnormal density')) return '#ff9900';
-    if (cell.characteristics.includes('enlarged')) return '#00ff00';
-    return '#0000ff';
+      // Add label for abnormal cells
+      if (data.characteristics.length > 0) {
+        this.ctx.fillStyle = this.ctx.strokeStyle;
+        this.ctx.font = '10px Arial';
+        this.ctx.fillText(
+          data.characteristics.join(', '),
+          cell.x - cell.radius,
+          cell.y - cell.radius - 5
+        );
+      }
+    });
   }
 }
