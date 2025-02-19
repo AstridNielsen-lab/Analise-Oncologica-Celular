@@ -2,6 +2,7 @@ import React, { useState, useCallback } from 'react';
 import { Upload, Microscope, Phone, Globe } from 'lucide-react';
 import { CellAnalyzer } from './utils/cellAnalysis';
 import { CellAnalysisResult } from './types/analysis';
+import Chat from './components/Chat';
 
 const cellAnalyzer = new CellAnalyzer();
 
@@ -68,6 +69,11 @@ export default function App() {
           </div>
         </div>
       </header>
+
+      {/* Chat Component - Now positioned below header */}
+      <div className="max-w-7xl mx-auto px-4 py-4 sm:px-6 lg:px-8">
+        <Chat />
+      </div>
 
       {/* Usage Instructions */}
       <div className="bg-purple-50 border-b border-purple-100">
