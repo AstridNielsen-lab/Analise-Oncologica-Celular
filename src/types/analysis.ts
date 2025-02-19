@@ -1,4 +1,5 @@
 export type CellAnalysisLevel = 'low' | 'medium' | 'high';
+export type DiagnosisLevel = 'low' | 'medium' | 'high';
 
 export interface CellData {
   id: number;
@@ -27,7 +28,29 @@ export interface CellAnalysisResult {
   processedImageUrl: string;
 }
 
-export interface CellDescription {
-  type: 'hyperplasia' | 'hypoplasia' | 'hypertrophy' | 'hypotrophy' | 'atrophy' | 'metaplasia' | 'intracellular';
-  description: string;
+export interface AnomalyData {
+  id: number;
+  type: 'aneurysm' | 'mass' | 'calcification' | 'fluid';
+  location: string;
+  size: number;
+  density: number;
+  hounsfield: number;
+  irregularity: number;
+  characteristics: string[];
+}
+
+export interface MedicalAnalysisResult {
+  anomalies: AnomalyData[];
+  statistics: {
+    totalAnomalies: number;
+    averageDensity: number;
+    averageSize: number;
+    maxHounsfield: number;
+    minHounsfield: number;
+    criticalLocations: number;
+  };
+  executionTime: number;
+  abnormalityLevel: DiagnosisLevel;
+  diagnosis: string;
+  processedImageUrl: string;
 }
